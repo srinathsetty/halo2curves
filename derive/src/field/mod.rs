@@ -565,10 +565,11 @@ pub(crate) fn impl_field(input: TokenStream) -> TokenStream {
             // Full asm for moduli that fit in < 256 bits (e.g., BN254)
             asm::limb4::impl_arith(&field, inv64)
         } else if num_limbs == 4 && num_bits == 256 {
-            // Hybrid: asm add/double + generic mul/sub/neg/from_mont
-            // Full asm mul is available (impl_arith_256) and correct, but LLVM
-            // optimizes the generic Rust mul better when inlined into tight loops
-            // (sumcheck). The asm mul helps MSM/PCS but hurts sumcheck by ~30%.
+            // Hybrid: asm add/double + LLVM-generated mul/sub/neg/from_mont.
+            // LLVM's SOS (separate multiply then reduce) beats hand-written CIOS
+            // (fused multiply-reduce) by ~17% on AMD Zen3 because the multiplication
+            // phase can be deeply pipelined (16 independent mulx) whereas CIOS
+            // serializes across 4 dependent rounds.
             let asm_simple = asm::limb4::impl_arith_simple(&field);
             let generic_mul = arith::impl_arith_mul_only(&field, num_limbs, inv64);
             quote::quote! { #asm_simple #generic_mul }

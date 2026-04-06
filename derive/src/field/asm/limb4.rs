@@ -753,7 +753,7 @@ pub(crate) fn impl_arith_256(field: &syn::Ident, inv: u64) -> TokenStream {
         use core::arch::asm;
         impl #field {
             /// Doubles this field element.
-            #[inline]
+            #[inline(always)]
             pub fn double(&self) -> #field {
                 let mut r0: u64;
                 let mut r1: u64;
@@ -809,7 +809,7 @@ pub(crate) fn impl_arith_256(field: &syn::Ident, inv: u64) -> TokenStream {
             }
 
             /// Squares this element.
-            #[inline]
+            #[inline(always)]
             pub fn square(&self) -> #field {
                 self.mul(self)
             }
@@ -923,7 +923,7 @@ pub(crate) fn impl_arith_256(field: &syn::Ident, inv: u64) -> TokenStream {
             ///
             /// Uses r9 to capture overflow (CF+OF) after each round's reduction carry
             /// and feeds it into the next round's carry accumulator before reduction.
-            #[inline]
+            #[inline(always)]
             pub fn mul(&self, rhs: &Self) -> #field {
                 let mut r0: u64;
                 let mut r1: u64;
@@ -1149,7 +1149,7 @@ pub(crate) fn impl_arith_256(field: &syn::Ident, inv: u64) -> TokenStream {
             }
 
             /// Subtracts `rhs` from `self`, returning the result.
-            #[inline]
+            #[inline(always)]
             pub fn sub(&self, rhs: &Self) -> #field {
                 let mut r0: u64;
                 let mut r1: u64;
@@ -1203,7 +1203,7 @@ pub(crate) fn impl_arith_256(field: &syn::Ident, inv: u64) -> TokenStream {
             }
 
             /// Adds `rhs` to `self`, returning the result.
-            #[inline]
+            #[inline(always)]
             pub fn add(&self, rhs: &Self) -> #field {
                 let mut r0: u64;
                 let mut r1: u64;
@@ -1260,7 +1260,7 @@ pub(crate) fn impl_arith_256(field: &syn::Ident, inv: u64) -> TokenStream {
             }
 
             /// Negates `self`.
-            #[inline]
+            #[inline(always)]
             pub fn neg(&self) -> #field {
                 let mut r0: u64;
                 let mut r1: u64;
