@@ -25,6 +25,10 @@ pub(crate) fn impl_arith(field: &syn::Ident, inv: u64) -> TokenStream {
                         "adc r10, r10",
                         "adc r11, r11",
 
+                        // capture overflow carry (needed for full-width 256-bit moduli)
+                        "mov rax, 0",
+                        "adc rax, 0",
+
                         // copy result array to latter registers
                         "mov r12, r8",
                         "mov r13, r9",
@@ -37,6 +41,9 @@ pub(crate) fn impl_arith(field: &syn::Ident, inv: u64) -> TokenStream {
                         "sbb r14, qword ptr [{m_ptr} + 16]",
                         "sbb r15, qword ptr [{m_ptr} + 24]",
 
+                        // borrow from the overflow bit
+                        "sbb rax, 0",
+
                         // if carry copy former registers to out areas
                         "cmovc r12, r8",
                         "cmovc r13, r9",
@@ -45,6 +52,7 @@ pub(crate) fn impl_arith(field: &syn::Ident, inv: u64) -> TokenStream {
 
                         m_ptr = in(reg) #field::MODULUS_LIMBS.as_ptr(),
                         a_ptr = in(reg) self.0.as_ptr(),
+                        out("rax") _,
                         out("r8") _,
                         out("r9") _,
                         out("r10") _,
@@ -401,18 +409,27 @@ pub(crate) fn impl_arith(field: &syn::Ident, inv: u64) -> TokenStream {
                         "adcx r10, r12",
                         "adox r14, r10",
 
-                        //   Final subtraction
+                        // Capture 5th-limb overflow (needed for full-width 256-bit moduli).
+                        // adcx sets CF, adox sets OF; capture OF first since adc clobbers OF.
+                        "mov  r12, 0",
+                        "adox r12, r12",     // r12 = OF (adox doesn't touch CF)
+                        "mov  r10, 0",
+                        "adc  r10, 0",       // r10 = CF
+                        "or   r10, r12",     // r10 = 5th limb (0 or 1)
+
+                        //   Final subtraction (result - p), with 5th-limb borrow
                         "mov  r12, r11",
                         "sub  r12, qword ptr [{m_ptr} + 0]",
-                        "mov  r10, r13",
-                        "sbb  r10, qword ptr [{m_ptr} + 8]",
+                        "mov  r8, r13",
+                        "sbb  r8, qword ptr [{m_ptr} + 8]",
                         "mov  rdx, rax",
                         "sbb  rdx, qword ptr [{m_ptr} + 16]",
                         "mov  r15, r14",
                         "sbb  r15, qword ptr [{m_ptr} + 24]",
+                        "sbb  r10, 0",       // borrow from 5th limb
 
                         "cmovnc r11, r12",
-                        "cmovnc r13, r10",
+                        "cmovnc r13, r8",
                         "cmovnc rax, rdx",
                         "cmovnc r14, r15",
 
@@ -422,6 +439,7 @@ pub(crate) fn impl_arith(field: &syn::Ident, inv: u64) -> TokenStream {
                         inv = in(reg) #inv,
                         out("rax") r2,
                         out("rdx") _,
+                        out("r8") _,
                         out("r10") _,
                         out("r11") r0,
                         out("r12") _,
@@ -516,6 +534,10 @@ pub(crate) fn impl_arith(field: &syn::Ident, inv: u64) -> TokenStream {
                         "adc r10, qword ptr [{b_ptr} + 16]",
                         "adc r11, qword ptr [{b_ptr} + 24]",
 
+                        // capture overflow carry (needed for full-width 256-bit moduli)
+                        "mov rax, 0",
+                        "adc rax, 0",
+
                         // copy result array to latter registers
                         "mov r12, r8",
                         "mov r13, r9",
@@ -528,6 +550,9 @@ pub(crate) fn impl_arith(field: &syn::Ident, inv: u64) -> TokenStream {
                         "sbb r14, qword ptr [{m_ptr} + 16]",
                         "sbb r15, qword ptr [{m_ptr} + 24]",
 
+                        // borrow from the overflow bit
+                        "sbb rax, 0",
+
                         // if carry copy former registers to out areas
                         "cmovc r12, r8",
                         "cmovc r13, r9",
@@ -537,6 +562,7 @@ pub(crate) fn impl_arith(field: &syn::Ident, inv: u64) -> TokenStream {
                         m_ptr = in(reg) #field::MODULUS_LIMBS.as_ptr(),
                         a_ptr = in(reg) self.0.as_ptr(),
                         b_ptr = in(reg) rhs.0.as_ptr(),
+                        out("rax") _,
                         out("r8") _,
                         out("r9") _,
                         out("r10") _,
@@ -561,6 +587,687 @@ pub(crate) fn impl_arith(field: &syn::Ident, inv: u64) -> TokenStream {
                 unsafe {
                     asm!(
                         // load a array to former registers
+                        "mov r8, qword ptr [{m_ptr} + 0]",
+                        "mov r9, qword ptr [{m_ptr} + 8]",
+                        "mov r10, qword ptr [{m_ptr} + 16]",
+                        "mov r11, qword ptr [{m_ptr} + 24]",
+
+                        "sub r8, qword ptr [{a_ptr} + 0]",
+                        "sbb r9, qword ptr [{a_ptr} + 8]",
+                        "sbb r10, qword ptr [{a_ptr} + 16]",
+                        "sbb r11, qword ptr [{a_ptr} + 24]",
+
+                        "mov r12, qword ptr [{a_ptr} + 0]",
+                        "mov r13, qword ptr [{a_ptr} + 8]",
+                        "mov r14, qword ptr [{a_ptr} + 16]",
+                        "mov r15, qword ptr [{a_ptr} + 24]",
+
+                        "or r12, r13",
+                        "or r14, r15",
+                        "or r12, r14",
+
+                        "mov r13, 0xffffffffffffffff",
+                        "cmp r12, 0x0000000000000000",
+                        "cmove r13, r12",
+
+                        "and r8, r13",
+                        "and r9, r13",
+                        "and r10, r13",
+                        "and r11, r13",
+
+                        a_ptr = in(reg) self.0.as_ptr(),
+                        m_ptr = in(reg) #field::MODULUS_LIMBS.as_ptr(),
+                        out("r8") r0,
+                        out("r9") r1,
+                        out("r10") r2,
+                        out("r11") r3,
+                        out("r12") _,
+                        out("r13") _,
+                        out("r14") _,
+                        out("r15") _,
+                        options(pure, readonly, nostack)
+                    )
+                }
+                #field([r0, r1, r2, r3])
+            }
+        }
+    }
+}
+
+/// Generate asm only for add/double (safe for full-width 256-bit moduli).
+/// Used in hybrid mode: asm add/double + generic mul/sub/neg/from_mont.
+pub(crate) fn impl_arith_simple(field: &syn::Ident) -> TokenStream {
+    quote::quote! {
+        use core::arch::asm;
+        impl #field {
+            /// Doubles this field element.
+            #[inline]
+            pub fn double(&self) -> #field {
+                let mut r0: u64;
+                let mut r1: u64;
+                let mut r2: u64;
+                let mut r3: u64;
+                unsafe {
+                    asm!(
+                        "mov r8, qword ptr [{a_ptr} + 0]",
+                        "mov r9, qword ptr [{a_ptr} + 8]",
+                        "mov r10, qword ptr [{a_ptr} + 16]",
+                        "mov r11, qword ptr [{a_ptr} + 24]",
+                        "add r8, r8",
+                        "adc r9, r9",
+                        "adc r10, r10",
+                        "adc r11, r11",
+                        "mov rax, 0",
+                        "adc rax, 0",
+                        "mov r12, r8",
+                        "mov r13, r9",
+                        "mov r14, r10",
+                        "mov r15, r11",
+                        "sub r12, qword ptr [{m_ptr} + 0]",
+                        "sbb r13, qword ptr [{m_ptr} + 8]",
+                        "sbb r14, qword ptr [{m_ptr} + 16]",
+                        "sbb r15, qword ptr [{m_ptr} + 24]",
+                        "sbb rax, 0",
+                        "cmovc r12, r8",
+                        "cmovc r13, r9",
+                        "cmovc r14, r10",
+                        "cmovc r15, r11",
+                        m_ptr = in(reg) #field::MODULUS_LIMBS.as_ptr(),
+                        a_ptr = in(reg) self.0.as_ptr(),
+                        out("rax") _,
+                        out("r8") _,
+                        out("r9") _,
+                        out("r10") _,
+                        out("r11") _,
+                        out("r12") r0,
+                        out("r13") r1,
+                        out("r14") r2,
+                        out("r15") r3,
+                        options(pure, readonly, nostack)
+                    );
+                }
+                #field([r0, r1, r2, r3])
+            }
+
+            /// Adds `rhs` to `self`, returning the result.
+            #[inline]
+            pub fn add(&self, rhs: &Self) -> #field {
+                let mut r0: u64;
+                let mut r1: u64;
+                let mut r2: u64;
+                let mut r3: u64;
+                unsafe {
+                    asm!(
+                        "mov r8, qword ptr [{a_ptr} + 0]",
+                        "mov r9, qword ptr [{a_ptr} + 8]",
+                        "mov r10, qword ptr [{a_ptr} + 16]",
+                        "mov r11, qword ptr [{a_ptr} + 24]",
+                        "add r8, qword ptr [{b_ptr} + 0]",
+                        "adc r9, qword ptr [{b_ptr} + 8]",
+                        "adc r10, qword ptr [{b_ptr} + 16]",
+                        "adc r11, qword ptr [{b_ptr} + 24]",
+                        "mov rax, 0",
+                        "adc rax, 0",
+                        "mov r12, r8",
+                        "mov r13, r9",
+                        "mov r14, r10",
+                        "mov r15, r11",
+                        "sub r12, qword ptr [{m_ptr} + 0]",
+                        "sbb r13, qword ptr [{m_ptr} + 8]",
+                        "sbb r14, qword ptr [{m_ptr} + 16]",
+                        "sbb r15, qword ptr [{m_ptr} + 24]",
+                        "sbb rax, 0",
+                        "cmovc r12, r8",
+                        "cmovc r13, r9",
+                        "cmovc r14, r10",
+                        "cmovc r15, r11",
+                        m_ptr = in(reg) #field::MODULUS_LIMBS.as_ptr(),
+                        a_ptr = in(reg) self.0.as_ptr(),
+                        b_ptr = in(reg) rhs.0.as_ptr(),
+                        out("rax") _,
+                        out("r8") _,
+                        out("r9") _,
+                        out("r10") _,
+                        out("r11") _,
+                        out("r12") r0,
+                        out("r13") r1,
+                        out("r14") r2,
+                        out("r15") r3,
+                        options(pure, readonly, nostack)
+                    );
+                }
+                #field([r0, r1, r2, r3])
+            }
+        }
+    }
+}
+
+/// Full asm for 256-bit moduli with proper carry propagation in Montgomery mul.
+///
+/// The standard CIOS Montgomery multiplication asm clears CF/OF between rounds
+/// via `xor r12, r12`, which loses overflow carries for full-width 256-bit moduli.
+/// This version captures the overflow after each round's reduction into r9 and
+/// feeds it back into the next round's carry accumulator (r12).
+pub(crate) fn impl_arith_256(field: &syn::Ident, inv: u64) -> TokenStream {
+    quote::quote! {
+        use core::arch::asm;
+        impl #field {
+            /// Doubles this field element.
+            #[inline]
+            pub fn double(&self) -> #field {
+                let mut r0: u64;
+                let mut r1: u64;
+                let mut r2: u64;
+                let mut r3: u64;
+                unsafe {
+                    asm!(
+                        "mov r8, qword ptr [{a_ptr} + 0]",
+                        "mov r9, qword ptr [{a_ptr} + 8]",
+                        "mov r10, qword ptr [{a_ptr} + 16]",
+                        "mov r11, qword ptr [{a_ptr} + 24]",
+
+                        "add r8, r8",
+                        "adc r9, r9",
+                        "adc r10, r10",
+                        "adc r11, r11",
+
+                        "mov rax, 0",
+                        "adc rax, 0",
+
+                        "mov r12, r8",
+                        "mov r13, r9",
+                        "mov r14, r10",
+                        "mov r15, r11",
+
+                        "sub r12, qword ptr [{m_ptr} + 0]",
+                        "sbb r13, qword ptr [{m_ptr} + 8]",
+                        "sbb r14, qword ptr [{m_ptr} + 16]",
+                        "sbb r15, qword ptr [{m_ptr} + 24]",
+
+                        "sbb rax, 0",
+
+                        "cmovc r12, r8",
+                        "cmovc r13, r9",
+                        "cmovc r14, r10",
+                        "cmovc r15, r11",
+
+                        m_ptr = in(reg) #field::MODULUS_LIMBS.as_ptr(),
+                        a_ptr = in(reg) self.0.as_ptr(),
+                        out("rax") _,
+                        out("r8") _,
+                        out("r9") _,
+                        out("r10") _,
+                        out("r11") _,
+                        out("r12") r0,
+                        out("r13") r1,
+                        out("r14") r2,
+                        out("r15") r3,
+                        options(pure, readonly, nostack)
+                    );
+                }
+                #field([r0, r1, r2, r3])
+            }
+
+            /// Squares this element.
+            #[inline]
+            pub fn square(&self) -> #field {
+                self.mul(self)
+            }
+
+            #[inline(always)]
+            pub(crate) fn from_mont(&self) -> [u64; Self::NUM_LIMBS] {
+                let mut r0: u64;
+                let mut r1: u64;
+                let mut r2: u64;
+                let mut r3: u64;
+
+                unsafe {
+                    asm!(
+                        "mov r8, qword ptr [{a_ptr} + 0]",
+                        "mov r9, qword ptr [{a_ptr} + 8]",
+                        "mov r10, qword ptr [{a_ptr} + 16]",
+                        "mov r11, qword ptr [{a_ptr} + 24]",
+                        "mov r15, {inv}",
+                        "xor r12, r12",
+
+                        // i0
+                        "mov rdx, r8",
+                        "mulx rcx, rdx, r15",
+                        "mulx rcx, rax, qword ptr [{m_ptr} + 0]",
+                        "adox r8, rax",
+                        "adcx r9, rcx",
+                        "mulx rcx, rax, qword ptr [{m_ptr} + 8]",
+                        "adox r9, rax",
+                        "adcx r10, rcx",
+                        "mulx rcx, rax, qword ptr [{m_ptr} + 16]",
+                        "adox r10, rax",
+                        "adcx r11, rcx",
+                        "mulx rcx, rax, qword ptr [{m_ptr} + 24]",
+                        "adox r11, rax",
+                        "adcx r8, rcx",
+                        "adox r8, r12",
+
+                        // i1
+                        "mov rdx, r9",
+                        "mulx rcx, rdx, r15",
+                        "mulx rcx, rax, qword ptr [{m_ptr} + 0]",
+                        "adox r9, rax",
+                        "adcx r10, rcx",
+                        "mulx rcx, rax, qword ptr [{m_ptr} + 8]",
+                        "adox r10, rax",
+                        "adcx r11, rcx",
+                        "mulx rcx, rax, qword ptr [{m_ptr} + 16]",
+                        "adox r11, rax",
+                        "adcx r8, rcx",
+                        "mulx rcx, rax, qword ptr [{m_ptr} + 24]",
+                        "adox r8, rax",
+                        "adcx r9, rcx",
+                        "adox r9, r12",
+
+                        // i2
+                        "mov rdx, r10",
+                        "mulx rcx, rdx, r15",
+                        "mulx rcx, rax, qword ptr [{m_ptr} + 0]",
+                        "adox r10, rax",
+                        "adcx r11, rcx",
+                        "mulx rcx, rax, qword ptr [{m_ptr} + 8]",
+                        "adox r11, rax",
+                        "adcx r8, rcx",
+                        "mulx rcx, rax, qword ptr [{m_ptr} + 16]",
+                        "adox r8, rax",
+                        "adcx r9, rcx",
+                        "mulx rcx, rax, qword ptr [{m_ptr} + 24]",
+                        "adox r9, rax",
+                        "adcx r10, rcx",
+                        "adox r10, r12",
+
+                        // i3
+                        "mov rdx, r11",
+                        "mulx rcx, rdx, r15",
+                        "mulx rcx, rax, qword ptr [{m_ptr} + 0]",
+                        "adox r11, rax",
+                        "adcx r8, rcx",
+                        "mulx rcx, rax, qword ptr [{m_ptr} + 8]",
+                        "adox r8, rax",
+                        "adcx r9, rcx",
+                        "mulx rcx, rax, qword ptr [{m_ptr} + 16]",
+                        "adox r9, rax",
+                        "adcx r10, rcx",
+                        "mulx rcx, rax, qword ptr [{m_ptr} + 24]",
+                        "adox r10, rax",
+                        "adcx r11, rcx",
+                        "adox r11, r12",
+
+                        a_ptr = in(reg) self.0.as_ptr(),
+                        m_ptr = in(reg) #field::MODULUS_LIMBS.as_ptr(),
+                        inv = in(reg) #inv,
+
+                        out("rax") _,
+                        out("rcx") _,
+                        out("rdx") _,
+                        out("r8") r0,
+                        out("r9") r1,
+                        out("r10") r2,
+                        out("r11") r3,
+                        out("r12") _,
+                        out("r13") _,
+                        out("r14") _,
+                        out("r15") _,
+                        options(pure, readonly, nostack)
+                    )
+                }
+                [r0, r1, r2, r3]
+            }
+
+            /// Montgomery multiplication with proper carry propagation for 256-bit moduli.
+            ///
+            /// Uses r9 to capture overflow (CF+OF) after each round's reduction carry
+            /// and feeds it into the next round's carry accumulator before reduction.
+            #[inline]
+            pub fn mul(&self, rhs: &Self) -> #field {
+                let mut r0: u64;
+                let mut r1: u64;
+                let mut r2: u64;
+                let mut r3: u64;
+                unsafe {
+                    asm!(
+                        // r9 = inter-round overflow carry (0, 1, or 2)
+                        "xor r9, r9",
+
+                        // ===== Outer loop i = 0 =====
+                        //   Multiplication
+                        "mov  rdx, qword ptr [{b_ptr} + 0]",
+                        "mulx r13, r11, qword ptr [{a_ptr} + 0]",
+                        "mulx rax, r15, qword ptr [{a_ptr} + 8]",
+                        "add  r13, r15",
+                        "mulx r14, r15, qword ptr [{a_ptr} + 16]",
+                        "adc  rax, r15",
+                        "mulx r12, r15, qword ptr [{a_ptr} + 24]",
+                        "adc  r14, r15",
+                        "adc  r12, 0",
+                        // Add previous overflow (0 for first round)
+                        "add  r12, r9",
+
+                        //   Reduction
+                        "mov  rdx, r11",
+                        "imul rdx, {inv}",
+                        "xor  r15, r15",
+                        "mulx r15, r10, qword ptr [{m_ptr} + 0]",
+                        "adcx r10, r11",
+                        "mov  r11, r15",
+                        "mov  r10, 0",
+                        "adcx r11, r13",
+                        "mulx r13, r15, qword ptr [{m_ptr} + 8]",
+                        "adox r11, r15",
+                        "adcx r13, rax",
+                        "mulx rax, r15, qword ptr [{m_ptr} + 16]",
+                        "adox r13, r15",
+                        "adcx rax, r14",
+                        "mulx r14, r15, qword ptr [{m_ptr} + 24]",
+                        "adox rax, r15",
+                        //   Reduction carry
+                        "adcx r10, r12",
+                        "adox r14, r10",
+
+                        // Capture overflow: r9 = OF + CF, clears both flags
+                        "mov  r9, 0",
+                        "mov  r12, 0",
+                        "adox r9, r12",
+                        "adc  r9, 0",
+
+                        // ===== Outer loop i = 1 =====
+                        "mov  rdx, qword ptr [{b_ptr} + 8]",
+                        "xor  r12, r12",
+                        "mulx r12, r15, qword ptr [{a_ptr} + 0]",
+                        "adox r11, r15",
+                        "adcx r13, r12",
+                        "mulx r12, r15, qword ptr [{a_ptr} + 8]",
+                        "adox r13, r15",
+                        "adcx rax, r12",
+                        "mulx r12, r15, qword ptr [{a_ptr} + 16]",
+                        "adox rax, r15",
+                        "adcx r14, r12",
+                        "mulx r12, r15, qword ptr [{a_ptr} + 24]",
+                        "adox r14, r15",
+                        "mov  rdx, 0",
+                        "adcx r12, rdx",
+                        "adox r12, rdx",
+                        // Add previous overflow
+                        "add  r12, r9",
+
+                        //   Reduction
+                        "mov  rdx, r11",
+                        "imul rdx, {inv}",
+                        "xor  r15, r15",
+                        "mulx r15, r10, qword ptr [{m_ptr} + 0]",
+                        "adcx r10, r11",
+                        "mov  r11, r15",
+                        "mov  r10, 0",
+                        "adcx r11, r13",
+                        "mulx r13, r15, qword ptr [{m_ptr} + 8]",
+                        "adox r11, r15",
+                        "adcx r13, rax",
+                        "mulx rax, r15, qword ptr [{m_ptr} + 16]",
+                        "adox r13, r15",
+                        "adcx rax, r14",
+                        "mulx r14, r15, qword ptr [{m_ptr} + 24]",
+                        "adox rax, r15",
+                        "adcx r10, r12",
+                        "adox r14, r10",
+
+                        // Capture overflow
+                        "mov  r9, 0",
+                        "mov  r12, 0",
+                        "adox r9, r12",
+                        "adc  r9, 0",
+
+                        // ===== Outer loop i = 2 =====
+                        "mov  rdx, qword ptr [{b_ptr} + 16]",
+                        "xor  r12, r12",
+                        "mulx r12, r15, qword ptr [{a_ptr} + 0]",
+                        "adox r11, r15",
+                        "adcx r13, r12",
+                        "mulx r12, r15, qword ptr [{a_ptr} + 8]",
+                        "adox r13, r15",
+                        "adcx rax, r12",
+                        "mulx r12, r15, qword ptr [{a_ptr} + 16]",
+                        "adox rax, r15",
+                        "adcx r14, r12",
+                        "mulx r12, r15, qword ptr [{a_ptr} + 24]",
+                        "adox r14, r15",
+                        "mov  rdx, 0",
+                        "adcx r12, rdx",
+                        "adox r12, rdx",
+                        "add  r12, r9",
+
+                        //   Reduction
+                        "mov  rdx, r11",
+                        "imul rdx, {inv}",
+                        "xor  r15, r15",
+                        "mulx r15, r10, qword ptr [{m_ptr} + 0]",
+                        "adcx r10, r11",
+                        "mov  r11, r15",
+                        "mov  r10, 0",
+                        "adcx r11, r13",
+                        "mulx r13, r15, qword ptr [{m_ptr} + 8]",
+                        "adox r11, r15",
+                        "adcx r13, rax",
+                        "mulx rax, r15, qword ptr [{m_ptr} + 16]",
+                        "adox r13, r15",
+                        "adcx rax, r14",
+                        "mulx r14, r15, qword ptr [{m_ptr} + 24]",
+                        "adox rax, r15",
+                        "adcx r10, r12",
+                        "adox r14, r10",
+
+                        // Capture overflow
+                        "mov  r9, 0",
+                        "mov  r12, 0",
+                        "adox r9, r12",
+                        "adc  r9, 0",
+
+                        // ===== Outer loop i = 3 =====
+                        "mov  rdx, qword ptr [{b_ptr} + 24]",
+                        "xor  r12, r12",
+                        "mulx r12, r15, qword ptr [{a_ptr} + 0]",
+                        "adox r11, r15",
+                        "adcx r13, r12",
+                        "mulx r12, r15, qword ptr [{a_ptr} + 8]",
+                        "adox r13, r15",
+                        "adcx rax, r12",
+                        "mulx r12, r15, qword ptr [{a_ptr} + 16]",
+                        "adox rax, r15",
+                        "adcx r14, r12",
+                        "mulx r12, r15, qword ptr [{a_ptr} + 24]",
+                        "adox r14, r15",
+                        "mov  rdx, 0",
+                        "adcx r12, rdx",
+                        "adox r12, rdx",
+                        "add  r12, r9",
+
+                        //   Reduction
+                        "mov  rdx, r11",
+                        "imul rdx, {inv}",
+                        "xor  r15, r15",
+                        "mulx r15, r10, qword ptr [{m_ptr} + 0]",
+                        "adcx r10, r11",
+                        "mov  r11, r15",
+                        "mov  r10, 0",
+                        "adcx r11, r13",
+                        "mulx r13, r15, qword ptr [{m_ptr} + 8]",
+                        "adox r11, r15",
+                        "adcx r13, rax",
+                        "mulx rax, r15, qword ptr [{m_ptr} + 16]",
+                        "adox r13, r15",
+                        "adcx rax, r14",
+                        "mulx r14, r15, qword ptr [{m_ptr} + 24]",
+                        "adox rax, r15",
+                        "adcx r10, r12",
+                        "adox r14, r10",
+
+                        // Capture final overflow into r9 (5th limb for conditional sub)
+                        "mov  r9, 0",
+                        "mov  r12, 0",
+                        "adox r9, r12",
+                        "adc  r9, 0",
+
+                        // Final subtraction: (r9:r14:rax:r13:r11) - modulus
+                        "mov  r12, r11",
+                        "sub  r12, qword ptr [{m_ptr} + 0]",
+                        "mov  r8, r13",
+                        "sbb  r8, qword ptr [{m_ptr} + 8]",
+                        "mov  rdx, rax",
+                        "sbb  rdx, qword ptr [{m_ptr} + 16]",
+                        "mov  r15, r14",
+                        "sbb  r15, qword ptr [{m_ptr} + 24]",
+                        "sbb  r9, 0",
+
+                        "cmovnc r11, r12",
+                        "cmovnc r13, r8",
+                        "cmovnc rax, rdx",
+                        "cmovnc r14, r15",
+
+                        m_ptr = in(reg) #field::MODULUS_LIMBS.as_ptr(),
+                        a_ptr = in(reg) self.0.as_ptr(),
+                        b_ptr = in(reg) rhs.0.as_ptr(),
+                        inv = in(reg) #inv,
+                        out("rax") r2,
+                        out("rdx") _,
+                        out("r8") _,
+                        out("r9") _,
+                        out("r10") _,
+                        out("r11") r0,
+                        out("r12") _,
+                        out("r13") r1,
+                        out("r14") r3,
+                        out("r15") _,
+                        options(pure, readonly, nostack)
+                    )
+                }
+
+                #field([r0, r1, r2, r3])
+            }
+
+            /// Subtracts `rhs` from `self`, returning the result.
+            #[inline]
+            pub fn sub(&self, rhs: &Self) -> #field {
+                let mut r0: u64;
+                let mut r1: u64;
+                let mut r2: u64;
+                let mut r3: u64;
+                unsafe {
+                    asm!(
+                        "mov r12, qword ptr [{m_ptr} + 0]",
+                        "mov r13, qword ptr [{m_ptr} + 8]",
+                        "mov r14, qword ptr [{m_ptr} + 16]",
+                        "mov r15, qword ptr [{m_ptr} + 24]",
+
+                        "mov r8, qword ptr [{a_ptr} + 0]",
+                        "mov r9, qword ptr [{a_ptr} + 8]",
+                        "mov r10, qword ptr [{a_ptr} + 16]",
+                        "mov r11, qword ptr [{a_ptr} + 24]",
+
+                        "sub r8, qword ptr [{b_ptr} + 0]",
+                        "sbb r9, qword ptr [{b_ptr} + 8]",
+                        "sbb r10, qword ptr [{b_ptr} + 16]",
+                        "sbb r11, qword ptr [{b_ptr} + 24]",
+
+                        "sbb rax, rax",
+
+                        "and r12, rax",
+                        "and r13, rax",
+                        "and r14, rax",
+                        "and r15, rax",
+
+                        "add  r12, r8",
+                        "adc  r13, r9",
+                        "adc  r14, r10",
+                        "adc  r15, r11",
+
+                        m_ptr = in(reg) #field::MODULUS_LIMBS.as_ptr(),
+                        a_ptr = in(reg) self.0.as_ptr(),
+                        b_ptr = in(reg) rhs.0.as_ptr(),
+                        out("rax") _,
+                        out("r8") _,
+                        out("r9") _,
+                        out("r10") _,
+                        out("r11") _,
+                        out("r12") r0,
+                        out("r13") r1,
+                        out("r14") r2,
+                        out("r15") r3,
+                        options(pure, readonly, nostack)
+                    );
+                }
+                #field([r0, r1, r2, r3])
+            }
+
+            /// Adds `rhs` to `self`, returning the result.
+            #[inline]
+            pub fn add(&self, rhs: &Self) -> #field {
+                let mut r0: u64;
+                let mut r1: u64;
+                let mut r2: u64;
+                let mut r3: u64;
+                unsafe {
+                    asm!(
+                        "mov r8, qword ptr [{a_ptr} + 0]",
+                        "mov r9, qword ptr [{a_ptr} + 8]",
+                        "mov r10, qword ptr [{a_ptr} + 16]",
+                        "mov r11, qword ptr [{a_ptr} + 24]",
+
+                        "add r8, qword ptr [{b_ptr} + 0]",
+                        "adc r9, qword ptr [{b_ptr} + 8]",
+                        "adc r10, qword ptr [{b_ptr} + 16]",
+                        "adc r11, qword ptr [{b_ptr} + 24]",
+
+                        "mov rax, 0",
+                        "adc rax, 0",
+
+                        "mov r12, r8",
+                        "mov r13, r9",
+                        "mov r14, r10",
+                        "mov r15, r11",
+
+                        "sub r12, qword ptr [{m_ptr} + 0]",
+                        "sbb r13, qword ptr [{m_ptr} + 8]",
+                        "sbb r14, qword ptr [{m_ptr} + 16]",
+                        "sbb r15, qword ptr [{m_ptr} + 24]",
+
+                        "sbb rax, 0",
+
+                        "cmovc r12, r8",
+                        "cmovc r13, r9",
+                        "cmovc r14, r10",
+                        "cmovc r15, r11",
+
+                        m_ptr = in(reg) #field::MODULUS_LIMBS.as_ptr(),
+                        a_ptr = in(reg) self.0.as_ptr(),
+                        b_ptr = in(reg) rhs.0.as_ptr(),
+                        out("rax") _,
+                        out("r8") _,
+                        out("r9") _,
+                        out("r10") _,
+                        out("r11") _,
+                        out("r12") r0,
+                        out("r13") r1,
+                        out("r14") r2,
+                        out("r15") r3,
+                        options(pure, readonly, nostack)
+                    );
+                }
+                #field([r0, r1, r2, r3])
+            }
+
+            /// Negates `self`.
+            #[inline]
+            pub fn neg(&self) -> #field {
+                let mut r0: u64;
+                let mut r1: u64;
+                let mut r2: u64;
+                let mut r3: u64;
+                unsafe {
+                    asm!(
                         "mov r8, qword ptr [{m_ptr} + 0]",
                         "mov r9, qword ptr [{m_ptr} + 8]",
                         "mov r10, qword ptr [{m_ptr} + 16]",

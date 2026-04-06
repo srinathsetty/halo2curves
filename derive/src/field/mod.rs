@@ -562,7 +562,16 @@ pub(crate) fn impl_field(input: TokenStream) -> TokenStream {
     #[cfg(feature = "asm")]
     let impl_arith = {
         if num_limbs == 4 && num_bits < 256 {
+            // Full asm for moduli that fit in < 256 bits (e.g., BN254)
             asm::limb4::impl_arith(&field, inv64)
+        } else if num_limbs == 4 && num_bits == 256 {
+            // Hybrid: asm add/double + generic mul/sub/neg/from_mont
+            // Full asm mul is available (impl_arith_256) and correct, but LLVM
+            // optimizes the generic Rust mul better when inlined into tight loops
+            // (sumcheck). The asm mul helps MSM/PCS but hurts sumcheck by ~30%.
+            let asm_simple = asm::limb4::impl_arith_simple(&field);
+            let generic_mul = arith::impl_arith_mul_only(&field, num_limbs, inv64);
+            quote::quote! { #asm_simple #generic_mul }
         } else {
             arith::impl_arith(&field, num_limbs, inv64)
         }
