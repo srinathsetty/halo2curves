@@ -63,6 +63,11 @@ pub trait CurveExt:
     /// Obtains a point given Jacobian coordinates $X : Y : Z$, failing
     /// if the coordinates are not on the curve.
     fn new_jacobian(x: Self::Base, y: Self::Base, z: Self::Base) -> CtOption<Self>;
+
+    /// Variable-time mixed addition (Projective + Affine).
+    /// Uses madd-1998-cmo-2 formula (9M+2S) vs complete RCB (~12-18M).
+    /// Handles identity self and same-x fallback internally.
+    fn add_mixed_vartime(&self, other: &Self::AffineExt) -> Self;
 }
 /// This trait is the affine counterpart to `Curve` and is used for
 /// serialization, storage in memory, and inspection of $x$ and $y$ coordinates.
