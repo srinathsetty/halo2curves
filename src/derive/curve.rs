@@ -303,6 +303,12 @@ macro_rules! new_curve_impl {
                     return other.to_curve();
                 }
 
+                // Handle other = identity (affine (0,0))
+                // madd-1998-cmo formula assumes affine input is non-identity
+                if bool::from(other.is_identity()) {
+                    return *self;
+                }
+
                 // madd-1998-cmo-2 for homogeneous projective coordinates
                 // (X:Y:Z) represents affine (X/Z, Y/Z)
                 let u = other.y * self.z - self.y;
