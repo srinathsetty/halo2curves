@@ -290,6 +290,45 @@ macro_rules! new_curve_impl {
                     input * $name::curve_constant_3b()
                 }
             }
+
+            /// Variable-time mixed addition (Projective + Affine) using the
+            /// madd-1998-cmo-2 formula (9M + 2S) instead of the complete RCB formula.
+            /// For a=0 curves (BN254): saves ~1M vs complete (~12M).
+            /// For a≠0 curves (T256): saves ~7M vs complete (~18M).
+            /// Falls back to the complete formula for degenerate cases.
+            #[inline]
+            pub fn add_mixed_vartime(&self, other: &$name_affine) -> Self {
+                // Handle self = identity (z == 0)
+                if bool::from(self.z.is_zero()) {
+                    return other.to_curve();
+                }
+
+                // Handle other = identity (affine (0,0))
+                // madd-1998-cmo formula assumes affine input is non-identity
+                if bool::from(other.is_identity()) {
+                    return *self;
+                }
+
+                // madd-1998-cmo-2 for homogeneous projective coordinates
+                // (X:Y:Z) represents affine (X/Z, Y/Z)
+                let u = other.y * self.z - self.y;
+                let v = other.x * self.z - self.x;
+
+                // v == 0 means same x-coordinate: either doubling or P + (-P)
+                if bool::from(v.is_zero()) {
+                    return *self + other;
+                }
+
+                let uu = u.square();
+                let vv = v.square();
+                let vvv = v * vv;
+                let r = vv * self.x;
+                let a = uu * self.z - vvv - r.double();
+                let x3 = v * a;
+                let y3 = u * (r - a) - self.y * vvv;
+                let z3 = vvv * self.z;
+                $name { x: x3, y: y3, z: z3 }
+            }
         }
 
         impl $name_affine {
@@ -464,6 +503,11 @@ macro_rules! new_curve_impl {
                     z
                 };
                 CtOption::new(p, p.is_on_curve())
+            }
+
+            #[inline]
+            fn add_mixed_vartime(&self, other: &Self::AffineExt) -> Self {
+                self.add_mixed_vartime(other)
             }
         }
 
